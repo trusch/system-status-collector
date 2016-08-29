@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,6 +23,9 @@ var dbAddr = flag.String("db-addr", "localhost", "db server address")
 var dbName = flag.String("db", "systemstatus", "which db to use")
 var collectionName = flag.String("collection", "systemstatus", "which collection to use")
 var sleep = flag.Int("sleep", 60, "seconds to sleep between scans")
+var httpAddr = flag.String("http", ":9000", "http listen address")
+
+var lastState = make(map[string]*Status)
 
 // UnitStatus represents one systemd unit
 type UnitStatus struct {
@@ -103,6 +107,11 @@ func GetStatus(config *HostConfig) *Status {
 	return status
 }
 
+func handleGet(w http.ResponseWriter, req *http.Request) {
+	bs, _ := yaml.Marshal(lastState)
+	w.Write(bs)
+}
+
 func main() {
 	flag.Parse()
 
@@ -119,17 +128,27 @@ func main() {
 		log.Fatal(err)
 	}
 
-	for {
-		for device, config := range cfg {
-			status := GetStatus(config)
-			doc := bson.M{"device": device, "status": status}
-			if err := collection.Insert(doc); err != nil {
-				log.Print(err)
-				continue
+	go func() {
+		for {
+			for device, config := range cfg {
+				status := GetStatus(config)
+				lastState[device] = status
+				doc := bson.M{"device": device, "status": status}
+				if err := collection.Insert(doc); err != nil {
+					log.Print(err)
+					continue
+				}
+				bs, _ := yaml.Marshal(doc)
+				fmt.Println(string(bs))
 			}
-			bs, _ := yaml.Marshal(doc)
-			fmt.Println(string(bs))
+			time.Sleep(time.Duration(*sleep) * time.Second)
 		}
-		time.Sleep(time.Duration(*sleep) * time.Second)
+	}()
+
+	if *httpAddr != "" {
+		http.HandleFunc("/", handleGet)
+		log.Fatal(http.ListenAndServe(*httpAddr, nil))
+	} else {
+		select {}
 	}
 }
