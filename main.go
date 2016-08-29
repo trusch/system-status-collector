@@ -12,10 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/yaml.v2"
 )
 
 var configpath = flag.String("c", "/etc/system-status-collector.json", "config file")
+var dbAddr = flag.String("db-addr", "localhost", "db server address")
+var dbName = flag.String("db", "systemstatus", "which db to use")
+var collectionName = flag.String("collection", "systemstatus", "which collection to use")
+var sleep = flag.Int("sleep", 60, "seconds to sleep between scans")
 
 // UnitStatus represents one systemd unit
 type UnitStatus struct {
@@ -99,15 +105,31 @@ func GetStatus(config *HostConfig) *Status {
 
 func main() {
 	flag.Parse()
-	cfg := Config{}
-	err := cfg.Load(*configpath)
+
+	session, err := mgo.Dial(*dbAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for device, config := range cfg {
-		status := GetStatus(config)
-		fmt.Println("---------------------", device, "----------------------")
-		bs, _ := yaml.Marshal(status)
-		fmt.Println(string(bs))
+	defer session.Close()
+	collection := session.DB(*dbName).C(*collectionName)
+
+	cfg := Config{}
+	err = cfg.Load(*configpath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		for device, config := range cfg {
+			status := GetStatus(config)
+			doc := bson.M{"device": device, "status": status}
+			if err := collection.Insert(doc); err != nil {
+				log.Print(err)
+				continue
+			}
+			bs, _ := yaml.Marshal(doc)
+			fmt.Println(string(bs))
+		}
+		time.Sleep(time.Duration(*sleep) * time.Second)
 	}
 }
