@@ -1,0 +1,15 @@
+{
+  "local": {
+    "address": "localhost",
+    "units": [
+      "cron",
+      "dbus"
+    ]
+  },
+  "rpi3-alpha": {
+    "address": "pi@rpi3-alpha",
+    "units": [
+      "susi-duktape"
+    ]
+  }
+}
